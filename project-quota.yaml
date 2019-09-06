@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: prj-quota
+spec:
+  hard:
+        cpu: 5
+        memory: 5Gi
+        pods: 4
+  scopes:
+  - NotTerminating
