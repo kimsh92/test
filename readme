@@ -1,0 +1,73 @@
+for x in {1..10}; do curl -s http://green.paas.thkose3.com/ | grep -q blue && echo $x blue || echo $x green; done
+
+
+oc policy add-role-to-user edit system:serviceaccount:cj-jenkins:jenkins -n cj-jenkins-dev
+oc policy add-role-to-user edit system:serviceaccount:cj-jenkins:jenkins -n cj-jenkins-prod
+oc policy add-role-to-group system:image-puller system:serviceaccounts:cj-jenkins-prod -n cj-jenkins-dev
+
+CREATE JENKINS PIPELINE
+Add to Project -> Import YAML/JSON
+
+
+
+kind: BuildConfig
+apiVersion: "v1"
+metadata:
+  name: cj-pipeline
+spec:
+  strategy:
+    jenkinsPipelineStrategy:
+      jenkinsfile: |-
+        try {
+                  timeout(time: 20, unit: 'MINUTES') {
+                    node {
+                      stage('build') {
+                        openshift.withCluster() {
+                          openshift.withProject('cj-jenkins-dev') {
+                            def bld = openshift.startBuild('cj-jenkins-dev')
+                            bld.untilEach {
+                              return it.object().status.phase == "Running"
+                            }
+                            bld.logs('-f')
+                          }  
+                        }
+                      }
+                      stage('deploy') {
+                        openshift.withCluster() {
+                          openshift.withProject('cj-jenkins-dev') {
+                            def dc = openshift.selector('dc', 'cj-jenkins-dev')
+                            dc.rollout().latest()
+                          }
+                        }
+                      }
+                      stage('Promote to Product?') {
+                          timeout(time:60, unit:'MINUTES') {
+                            input message: "Promote to Product?", ok: "Promote"
+                          }
+                          script {
+                            openshift.withCluster() {
+                              openshift.tag("cj-jenkins-dev/cj-jenkins-dev:latest", "cj-jenkins-prod/cj-jenkins-prod:latest")
+                            }
+                          }
+                      }
+                      stage('ScaleUp') {
+                        openshift.withCluster() {
+                          openshift.withProject('cj-jenkins-prod') {
+                            def dc = openshift.selector('dc', 'cj-jenkins-prod')
+                            dc.object().spec.replicas = 2
+                          }
+                        }
+                      }
+                    }
+                  }
+                } catch (err) {
+                  echo "in catch block"
+                  echo "Caught: ${err}"
+                  currentBuild.result = 'FAILURE'
+                  throw err
+                }
+    type: JenkinsPipeline
+
+
+
+
